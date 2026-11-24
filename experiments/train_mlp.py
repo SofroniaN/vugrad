@@ -6,6 +6,7 @@ import numpy as np
 from argparse import ArgumentParser
 
 import vugrad as vg
+from vugrad.core import Op
 
 # Parse command line arguments
 parser = ArgumentParser()
@@ -30,8 +31,15 @@ parser.add_argument('-l', '--learning-rate',
                 help='The learning rate. That is, a scalar that determines the size of the steps taken by the '
                      'gradient descent algorithm. 0.1 works well for synth, 0.0001 works well for MNIST.',
                 default=0.01, type=float)
+parser.add_argument('-a', '--activation',
+             choices=['sigmoid', 'relu'],
+             default='sigmoid',
+             help='Activation function to use on the hidden layer.')
+parser.add_argument('--seed', default=0, type=int,
+             help='Seed for reproducible data and parameter initialization.')
 
 args = parser.parse_args()
+np.random.seed(args.seed)
 
 ## Load the data
 if args.data == 'synth':
@@ -48,6 +56,16 @@ print(f'     val. class distribution: {np.bincount(yval)}')
 
 num_instances, num_features = xtrain.shape
 
+class ReLU(Op):
+    @staticmethod
+    def forward(context, input):
+        context['positive'] = input > 0
+        return np.maximum(input, 0)
+
+    @staticmethod
+    def backward(context, goutput):
+        return goutput * context['positive']
+
 # Create a simple neural network.
 # This is a `Module` consisting of other modules representing linear layers, provided by the vugrad library.
 class MLP(vg.Module):
@@ -56,7 +74,7 @@ class MLP(vg.Module):
     output.
     """
 
-    def __init__(self, input_size, output_size, hidden_mult=4):
+    def __init__(self, input_size, output_size, hidden_mult=4, activation='sigmoid'):
         """
         :param input_size:
         :param output_size:
@@ -70,6 +88,7 @@ class MLP(vg.Module):
 
         self.layer1 = vg.Linear(input_size, hidden_size)
         self.layer2 = vg.Linear(hidden_size, output_size)
+        self.activation = activation
         # -- The linear layer (without activation) is implemented in vugrad. We simply instantiate these modules, and
         #    add them to our network.
 
@@ -81,7 +100,10 @@ class MLP(vg.Module):
         hidden = self.layer1(input)
 
         # non-linearity
-        hidden = vg.sigmoid(hidden)
+        if self.activation == 'relu':
+            hidden = ReLU.do_forward(hidden)
+        else:
+            hidden = vg.sigmoid(hidden)
         # -- We've called a utility function here, to mimin how this is usually done in pytorch. We could also do:
         #    hidden = Sigmoid.do_forward(hidden)
 
@@ -101,7 +123,7 @@ class MLP(vg.Module):
         return self.layer1.parameters() + self.layer2.parameters()
 
 ## Instantiate the model
-mlp = MLP(input_size=num_features, output_size=num_classes)
+mlp = MLP(input_size=num_features, output_size=num_classes, activation=args.activation)
 
 n, m = xtrain.shape
 b = args.batch_size
@@ -167,3 +189,8 @@ for epoch in range(args.epochs):
         loss.clear()
 
     print(f'   running loss: {cl/n:.4}')
+
+o = mlp(vg.TensorNode(xval))
+final_accuracy = np.mean(np.argmax(o.value, axis=1) == yval)
+o.clear()
+print(f'final validation accuracy: {final_accuracy:.4}')
