@@ -38,6 +38,11 @@ parser.add_argument('-a', '--activation',
 parser.add_argument('--seed', default=0, type=int,
              help='Seed for reproducible data and parameter initialization.')
 
+parser.add_argument('-i', '--init',
+                    choices=['glorot', 'zeros', 'normal', 'he'],
+                    default='glorot',
+                    help='Weight initialization scheme.')
+
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -124,6 +129,23 @@ class MLP(vg.Module):
 
 ## Instantiate the model
 mlp = MLP(input_size=num_features, output_size=num_classes, activation=args.activation)
+def apply_initialization(mlp, init_type):
+    if init_type == 'glorot':
+        return  # Linear already uses Glorot initialization by default
+
+    for layer in [mlp.layer1, mlp.layer2]:
+        # In vugrad.Linear, layer.parameters() is [W, b] where W has shape (out_features, in_features)
+        W = layer.parameters()[0]
+        fan_in = W.value.shape[1]
+
+        if init_type == 'zeros':
+            W.value = np.zeros_like(W.value)
+        elif init_type == 'normal':
+            W.value = np.random.randn(*W.value.shape)
+        elif init_type == 'he':
+            W.value = np.random.randn(*W.value.shape) * np.sqrt(2.0 / fan_in)
+
+apply_initialization(mlp, args.init)
 
 n, m = xtrain.shape
 b = args.batch_size
